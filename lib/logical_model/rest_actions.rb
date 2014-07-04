@@ -58,10 +58,13 @@ class LogicalModel
         params = self.class.merge_key(params)
 
         response = nil
-        Timeout::timeout(self.class.timeout/1000) do
-          response = Typhoeus::Request.post( self.class.resource_uri, :body => params, :timeout => self.class.timeout )
+        self.class.measure 'post._create' do
+          Timeout::timeout(self.class.timeout/1000) do
+            response = Typhoeus::Request.post( self.class.resource_uri, :body => params, :timeout => self.class.timeout )
+          end
         end
         self.last_response_code = response.code
+        
         if response.code == 201 || response.code == 202
           log_ok(response)
           if self.respond_to?('id=')
@@ -103,12 +106,13 @@ class LogicalModel
         params = self.class.merge_key(params)
 
         response = nil
-        Timeout::timeout(self.class.timeout/1000) do
-          response = Typhoeus::Request.put( self.class.resource_uri(id),
-                                            :params => params,
-                                            :timeout => self.class.timeout )
+        self.class.measure 'put._update' do
+          Timeout::timeout(self.class.timeout/1000) do
+            response = Typhoeus::Request.put( self.class.resource_uri(id),
+                                              :params => params,
+                                              :timeout => self.class.timeout )
+          end
         end
-
         if response.code == 200
           log_ok(response)
           return self
@@ -142,8 +146,10 @@ class LogicalModel
         params = { self.json_root => sending_params }
         params = self.class.merge_key(params)
         response = nil
-        Timeout::timeout(self.class.timeout/1000) do
-          response = Typhoeus::Request.put( self.class.resource_uri(id), :params => params, :timeout => self.class.timeout )
+        self.class.measure 'put._save' do
+          Timeout::timeout(self.class.timeout/1000) do
+            response = Typhoeus::Request.put( self.class.resource_uri(id), :params => params, :timeout => self.class.timeout )
+          end
         end
         if response.code == 200
           log_ok(response)
@@ -194,38 +200,44 @@ class LogicalModel
 
       # @param options [Hash] will be forwarded to API
       def async_all(options={})
-        options = self.merge_key(options)
-        request = Typhoeus::Request.new(resource_uri, params: options, headers: default_headers)
-        request.on_complete do |response|
-          if response.code >= 200 && response.code < 400
-            log_ok(response)
+        measure 'async_all' do
+          options = self.merge_key(options)
+          request = Typhoeus::Request.new(resource_uri, params: options, headers: default_headers)
+          request.on_complete do |response|
+            measure 'on_complete.async_all' do
+              if response.code >= 200 && response.code < 400
+                log_ok(response)
 
-            result_set = self.from_json(response.body)
-            collection = result_set[:collection]
+                result_set = self.from_json(response.body)
+                collection = result_set[:collection]
 
-            yield collection
-          else
-            log_failed(response)
+                yield collection
+              else
+                log_failed(response)
+              end
+            end
           end
+          self.hydra.queue(request)
         end
-        self.hydra.queue(request)
       end
 
       def all(options={})
-        result = nil
-        self.retries.times do
-          begin
-            async_all(options){|i| result = i}
-            Timeout::timeout(self.timeout/1000) do
-              self.hydra.run
+        measure 'all' do
+          result = nil
+          self.retries.times do
+            begin
+              async_all(options){|i| result = i}
+              Timeout::timeout(self.timeout/1000) do
+                self.hydra.run
+              end
+              break unless result.nil?
+            rescue Timeout::Error
+              self.logger.warn("timeout")
+              result = nil
             end
-            break unless result.nil?
-          rescue Timeout::Error
-            self.logger.warn("timeout")
-            result = nil
           end
+          result
         end
-        result
       end
 
       # Asynchronic Pagination
@@ -241,52 +253,58 @@ class LogicalModel
       # Usage:
       #   Person.async_paginate(:page => params[:page]){|i| result = i}
       def async_paginate(options={})
-        options[:page] ||= 1
-        options[:per_page] ||= 20
+        measure 'async_paginate' do
+          options[:page] ||= 1
+          options[:per_page] ||= 20
 
-        options = self.merge_key(options)
+          options = self.merge_key(options)
 
-        request = Typhoeus::Request.new(resource_uri, params: options, headers: default_headers)
-        request.on_complete do |response|
-          if response.code >= 200 && response.code < 400
-            log_ok(response)
+          request = Typhoeus::Request.new(resource_uri, params: options, headers: default_headers)
+          request.on_complete do |response|
+            measure 'on_complete.async_paginate' do
+              if response.code >= 200 && response.code < 400
+                log_ok(response)
 
-            result_set = self.from_json(response.body)
+                result_set = self.from_json(response.body)
 
-            # this paginate is will_paginate's Array pagination
-            collection = Kaminari.paginate_array(
-                result_set[:collection],
-                {
-                    :total_count=>result_set[:total],
-                    :limit => options[:per_page],
-                    :offset => options[:per_page] * ([options[:page], 1].max - 1)
-                }
-            )
+                # this paginate is will_paginate's Array pagination
+                collection = Kaminari.paginate_array(
+                    result_set[:collection],
+                    {
+                        :total_count=>result_set[:total],
+                        :limit => options[:per_page],
+                        :offset => options[:per_page] * ([options[:page], 1].max - 1)
+                    }
+                )
 
-            yield collection
-          else
-            log_failed(response)
+                yield collection
+              else
+                log_failed(response)
+              end
+            end
           end
+          self.hydra.queue(request)
         end
-        self.hydra.queue(request)
       end
 
       #synchronic pagination
       def paginate(options={})
-        result = nil
-        self.retries.times do
-          begin
-            async_paginate(options){|i| result = i}
-            Timeout::timeout(self.timeout/1000) do
-              self.hydra.run
+        measure 'paginate' do
+          result = nil
+          self.retries.times do
+            begin
+              async_paginate(options){|i| result = i}
+              Timeout::timeout(self.timeout/1000) do
+                self.hydra.run
+              end
+              break unless result.nil?
+            rescue Timeout::Error
+              self.logger.warn("timeout")
+              result = nil
             end
-            break unless result.nil?
-          rescue Timeout::Error
-            self.logger.warn("timeout")
-            result = nil
           end
+          result
         end
-        result
       end
 
       # Asynchronic Count
@@ -302,37 +320,45 @@ class LogicalModel
       # @example 'Count bobs'
       #   Person.async_count(:when => {:name => 'bob'}}){|i| result = i}
       def async_count(options={})
-        options[:page] = 1
-        options[:per_page] = 1
+        measure 'async_count' do
+          options[:page] = 1
+          options[:per_page] = 1
 
-        options = self.merge_key(options)
+          options = self.merge_key(options)
 
-        request = Typhoeus::Request.new(resource_uri, params: options, headers: default_headers)
-        request.on_complete do |response|
-          if response.code >= 200 && response.code < 400
-            log_ok(response)
+          request = Typhoeus::Request.new(resource_uri, params: options, headers: default_headers)
+          request.on_complete do |response|
+            measure 'on_complete.async_count' do
+              if response.code >= 200 && response.code < 400
+                log_ok(response)
 
-            result_set = self.from_json(response.body)
+                result_set = self.from_json(response.body)
 
-            yield result_set[:total]
-          else
-            log_failed(response)
+                yield result_set[:total]
+              else
+                log_failed(response)
+              end
+            end
           end
+          self.hydra.queue(request)
         end
-        self.hydra.queue(request)
       end
 
       # synchronic count
       def count(options={})
-        result = nil
-        async_count(options){|i| result = i}
-        Timeout::timeout(self.timeout/1000) do
-          self.hydra.run
+        measure 'count' do
+          result = nil
+          begin
+            async_count(options){|i| result = i}
+            Timeout::timeout(self.timeout/1000) do
+              self.hydra.run
+            end
+            result
+          rescue Timeout::Error
+            self.logger.warn("timeout")
+            return nil
+          end
         end
-        result
-      rescue Timeout::Error
-        self.logger.warn("timeout")
-        return nil
       end
 
       # Asynchronic Find
@@ -346,19 +372,23 @@ class LogicalModel
       # Usage:
       #   Person.async_find(params[:id])
       def async_find(id, params = {})
-        params = self.merge_key(params)
-        request = Typhoeus::Request.new( resource_uri(id), :params => params )
+        measure 'async_find' do
+          params = self.merge_key(params)
+          request = Typhoeus::Request.new( resource_uri(id), :params => params )
 
-        request.on_complete do |response|
-          if response.code >= 200 && response.code < 400
-            log_ok(response)
-            yield async_find_response(id, params, response.body)
-          else
-            log_failed(response)
+          request.on_complete do |response|
+            measure 'on_complete.async_find' do
+              if response.code >= 200 && response.code < 400
+                log_ok(response)
+                yield async_find_response(id, params, response.body)
+              else
+                log_failed(response)
+              end
+            end
           end
-        end
 
-        self.hydra.queue(request)
+          self.hydra.queue(request)
+        end
       end
 
       def async_find_response(id, params, body)
@@ -367,15 +397,19 @@ class LogicalModel
 
       # synchronic find
       def find(id, params = {})
-        result = nil
-        async_find(id, params){|i| result = i}
-        Timeout::timeout(self.timeout/1000) do
-          self.hydra.run
+        measure 'find' do
+          result = nil
+          begin
+            async_find(id, params){|i| result = i}
+            Timeout::timeout(self.timeout/1000) do
+              self.hydra.run
+            end
+            result
+          rescue Timeout::Error
+            self.logger.warn("timeout")
+            return nil
+          end
         end
-        result
-      rescue Timeout::Error
-        self.logger.warn("timeout")
-        return nil
       end
 
       # Deletes Object#id
@@ -388,26 +422,29 @@ class LogicalModel
       # Usage:
       #   Person.delete(params[:id])
       def delete(id, params={})
+        measure 'delete' do
+          params = self.merge_key(params)
 
-        params = self.merge_key(params)
-
-        response = nil
-        Timeout::timeout(self.timeout/1000) do
-          response = Typhoeus::Request.delete( self.resource_uri(id),
-                                               :params => params,
-                                               :timeout => self.timeout
-          )
+          response = nil
+          begin
+            Timeout::timeout(self.timeout/1000) do
+              response = Typhoeus::Request.delete( self.resource_uri(id),
+                                                   :params => params,
+                                                   :timeout => self.timeout
+              )
+            end
+            if response.code == 200
+              log_ok(response)
+              return self
+            else
+              log_failed(response)
+              return nil
+            end
+          rescue Timeout::Error
+            self.logger.warn "timeout"
+            return nil
+          end
         end
-        if response.code == 200
-          log_ok(response)
-          return self
-        else
-          log_failed(response)
-          return nil
-        end
-      rescue Timeout::Error
-        self.logger.warn "timeout"
-        return nil
       end
 
       # Deletes all Objects matching given ids
@@ -422,28 +459,38 @@ class LogicalModel
       # Usage:
       #   Person.delete_multiple([1,2,4,5,6])
       def delete_multiple(ids, params={})
-        raise "not-enabled" unless self.delete_multiple_enabled?
+        measure 'delete_multiple' do
+          raise "not-enabled" unless self.delete_multiple_enabled?
 
-        params = self.merge_key(params)
-        params = params.merge({:ids => ids})
+          params = self.merge_key(params)
+          params = params.merge({:ids => ids})
 
-        response = nil
-        Timeout::timeout(self.timeout/1000) do
-          response = Typhoeus::Request.delete( self.resource_uri+"/destroy_multiple",
-                                               :params => params,
-                                               :timeout => self.timeout
-          )
+          response = nil
+          begin
+            Timeout::timeout(self.timeout/1000) do
+              response = Typhoeus::Request.delete( self.resource_uri+"/destroy_multiple",
+                                                   :params => params,
+                                                   :timeout => self.timeout
+              )
+            end
+            if response.code == 200
+              log_ok(response)
+              return self
+            else
+              log_failed(response)
+              return nil
+            end
+          rescue Timeout::Error
+            self.logger.warn "timeout"
+            return nil
+          end
         end
-        if response.code == 200
-          log_ok(response)
-          return self
-        else
-          log_failed(response)
-          return nil
+      end
+
+      def measure(key)
+        ActiveSupport::Notifications.instrument("#{key}.rest_actions.logical_model") do
+          yield
         end
-      rescue Timeout::Error
-        self.logger.warn "timeout"
-        return nil
       end
     end
   end
