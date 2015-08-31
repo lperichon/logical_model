@@ -52,10 +52,9 @@ GEM
       git (>= 1.2.5)
       rake
     json (1.6.4)
-    kaminari (0.13.0)
+    kaminari (0.15.1)
       actionpack (>= 3.0.0)
       activesupport (>= 3.0.0)
-      railties (>= 3.0.0)
     libnotify (0.7.1)
     mime-types (1.23)
     multi_json (1.0.4)
@@ -125,7 +124,7 @@ DEPENDENCIES
   guard-rspec
   jeweler (~> 1.6.4)
   json
-  kaminari (~> 0.13.0)
+  kaminari (~> 0.15.0)
   libnotify
   rake
   rb-inotify

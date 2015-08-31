@@ -5,7 +5,7 @@ gem "activemodel"
 gem "activesupport"
 gem "typhoeus", '0.5.0.alpha'
 gem "ethon", "0.4.2"
-gem "kaminari", '~> 0.13.0'
+gem "kaminari", '~> 0.15.0'
 
 group :development, :test do
   gem 'debugger'
