@@ -68,9 +68,15 @@ class LogicalModel
               else
                 # TODO if params has symbol key :_type this won't work
                 clazz_name = attr_params['_type']
-                attr_class = clazz_name.constantize unless clazz_name.blank?
-                # in this case we recieved object attributes, we instanciate here
-                collection << attr_class.new(attr_params)
+                if clazz_name == "Email"
+                  attr_class = Contacts::Email
+                  # in this case we recieved object attributes, we instanciate here
+                  collection << attr_class.new(attr_params)
+                else
+                  attr_class = clazz_name.constantize unless clazz_name.blank?
+                  # in this case we recieved object attributes, we instanciate here
+                  collection << attr_class.new(attr_params)
+                end
               end
             end
             instance_variable_set("@#{association}", collection)
@@ -80,8 +86,11 @@ class LogicalModel
           define_method "new_#{StringHelper.singularize(association.to_s)}" do |attr_params|
             run_callbacks :new_nested do
               clazz_name = attr_params['_type']
-              clazz = clazz_name.blank? ? attr_class  : clazz_name.constantize
-
+              if clazz_name == "Email"
+                clazz = Contacts::Email
+              else
+                clazz = clazz_name.blank? ? attr_class  : clazz_name.constantize
+              end
               return unless clazz
 
               temp_object = clazz.new(attr_params.merge({"#{self.json_root}_id" => self.id}))
@@ -95,8 +104,11 @@ class LogicalModel
             array = []
             key_attributes.each do |attr_params|
               clazz_name = attr_params['_type']
-              clazz = clazz_name.blank? ? attr_class  : clazz_name.constantize
-              
+              if clazz_name == "Email"
+                clazz = Contacts::Email
+              else
+                clazz = clazz_name.blank? ? attr_class  : clazz_name.constantize
+              end
               attr_params.to_hash.symbolize_keys!
               array << clazz.new(attr_params)
             end
